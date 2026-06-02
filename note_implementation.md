@@ -4,6 +4,8 @@ keccak specifications summary with pseudo-code: https://keccak.team/keccak_specs
 
 Keccak implementation: keccal.vhd from https://zenodo.org/records/14891518
 
+Open-source compiler for the implementation (and VHDL files in general): http://ghdl.free.fr/
+
 # 0. High-Level Overview of the Design
 
 This VHDL module implements the Keccak-f[1600] permutation, used in:
@@ -13,11 +15,10 @@ This VHDL module implements the Keccak-f[1600] permutation, used in:
 
 ### Key architectural features:
 
-- State size: 1600 bits → 5 × 5 × 64-bit lanes ( 5 x 5 lanes/words of 64 bits )
+- State size: 1600 bits → 5 × 5 × 64-bit lanes ( 5 x 5 lanes of 64 bits )
 - Architecture type: iterative (1 round per clock cycle)
 - Rounds: 24
-- Interface: streaming (AXI-like)
-
+  
 # 1. Internal State Representation
 
     type k_state is array(0 to 4, 0 to 4) of std_logic_vector(63 downto 0);
@@ -86,7 +87,7 @@ The round is split into **three** clearly defined stages:
 ### Relevant for SCA:
 
 - Leakage is spread across many bits
-- Hard to exploit directly (low signal-to-noise ratio)
+- Hard to exploit directly (low signal-to-noise ratio (SNR))
 
 # 4. Rho and Pi Steps (Permutation)
 
@@ -108,7 +109,7 @@ The round is split into **three** clearly defined stages:
 - Does not create new exploitable leakage
 - Only redistributes existing data
 
-# 5. Chi + Iota Step (Nonlinear Core)
+# 5. Chi + Iota Step (Non-linear)
 
 `chi_iota_out(x,y) <= rho_pi_out(x,y) xor 
                      (not rho_pi_out((x+1) mod 5,y) and rho_pi_out((x+2) mod 5,y));`
@@ -119,22 +120,18 @@ The round is split into **three** clearly defined stages:
 
 ### Function:
 
-> χ (chi): nonlinear substitution layer
-> ι (iota): adds round constant
+> $\chi$ (chi): **non-linear** substitution layer
+> $\iota$ (iota): adds round constant
 
 ### Important observation:
 
-This is the only nonlinear operation in Keccak.
+This is the only non-linear operation in Keccak.
 
-The key term:
+The key term `(~A & B)` introduces:
 
-`(~A & B)`
+> AND gate -> non-linear dependency
 
-introduces:
-
-> AND gate → nonlinear dependency
-
-> data-dependent switching activity → strong leakage source
+> data-dependent switching activity -> strong leakage source
 
 ## Local dependency
 
@@ -142,17 +139,14 @@ Each output depends only on:
 
 > A[x,y], A[x+1,y], A[x+2,y]
 
-This is crucial for:
-
-- divide & conquer
-- localized SCA attacks
+(Important for ideas of *divide & conquer* and *localized attacks*)
 
 # 6. State Update Logic
 
     s(x,y) <=
         reg_s(x,y) xor msg          when absorbing
         chi_iota_out(x,y)           when computing_round
-        reg_s(x,y)                  otherwise;
+        reg_s(x,y)                  otherwise
 
 This is a multiplexer controlled by:
 
@@ -198,7 +192,7 @@ Executes one round per clock
 
 `m_axis_tdata <= reg_s(...)`
 
-Outputs hash lanes sequentially
+Outputs hash lanes *sequentially*
 
 # 8. Round Counter
 
@@ -210,7 +204,7 @@ Outputs hash lanes sequentially
 
 ### Logic:
 
-- Starts when absorbing ends
+- Starts when the absorbing phase ends
 - Increments each cycle
 - Stops after round 23
 
@@ -220,7 +214,7 @@ Outputs hash lanes sequentially
 
 ### Function:
 
-- Acts as a shift register
+- Acts like a shift register
 - Selects which lane is:
   - absorbed
   - output
@@ -242,9 +236,9 @@ At each rising clock edge:
 
 ### Important:
 
-> theta_out, rho_pi_out, chi_iota_out are combinational
+> theta_out, rho_pi_out, chi_iota_out are **combinational**
 
-Only reg_s is stored
+*Only reg_s is stored*
 
 ## Leakage implication
 
@@ -285,33 +279,30 @@ but physically observable only when stored in `reg_s`
 
 ### Level 2 (round)
 
-- `θ` (linear diffusion)
-- `ρ + π` (permutation)
-- `χ + ι` (nonlinear core)
+- `θ` (theta) (linear diffusion)
+- `ρ + π` (rho + pi) (permutation)
+- `χ + ι` (chi + iota) (nonlinear core)
 
 ### Level 3 (micro)
 
 single Boolean operation:
 `(~A & B)`
 
-# 14. Final Key Points
+# 14. Summary
 
 ## 1. Iterative architecture
 
-One round per cycle → good temporal separation for SCA
+One round per cycle
 
 ## 2. Registered state
 
-`reg_s` is the only storage → main leakage source
+`reg_s` is the only storage -> main leakage source
 
-## 3. Clear combinational stages
+## 3. Clear and separated combinational stages
 
-Easy to isolate `χ` → ideal attack target
+- It's easy to isolate `χ` (chi), the target attack.
+- The locality of `χ` (chi) enables lane-wise / row-wise attacks
 
-## 4. Locality of χ
+## 4. Control signals exposed
 
-Enables lane-wise / row-wise attacks
-
-## 5. Control signals exposed
-
-`computing_round`, `current_round` → perfect for trace alignment
+`computing_round`, `current_round` -> perfect for trace alignment
